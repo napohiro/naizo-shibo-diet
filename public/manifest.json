@@ -1,0 +1,23 @@
+{
+  "name": "内臓脂肪ダイエット",
+  "short_name": "内臓脂肪",
+  "description": "生活習慣の改善をサポートする健康管理アプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef3ec",
+  "theme_color": "#7ebc64",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
