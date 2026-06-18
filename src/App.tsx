@@ -1,7 +1,8 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 
-type TabKey = 'home' | 'log' | 'meal' | 'move' | 'tips';
+type TabKey = 'home' | 'log' | 'meal' | 'graph' | 'move' | 'tips';
 type MealType = '朝' | '昼' | '夜' | '間食';
+type GraphMetric = 'weight' | 'waist';
 
 type MealRecord = {
   id: string;
@@ -105,7 +106,94 @@ function setStorage<T>(key: string, value: T) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function calorieBadge(cal: number): { label: string; cls: string } {
+  if (cal <= 450) return { label: '適正', cls: 'badge-ok' };
+  if (cal <= 700) return { label: 'やや多い', cls: 'badge-warn' };
+  return { label: '多い', cls: 'badge-over' };
+}
+
 const todayString = new Date().toISOString().slice(0, 10);
+
+type ChartPoint = { y: number; label: string };
+
+function LineChart({ data, color, gradId, unit }: { data: ChartPoint[]; color: string; gradId: string; unit: string }) {
+  if (data.length === 0) {
+    return <div className="chart-empty">記録が貯まるとグラフが表示されます</div>;
+  }
+  if (data.length === 1) {
+    return (
+      <div className="chart-single">
+        <span style={{ color, fontSize: '1.8rem', fontWeight: 700 }}>{data[0].y} {unit}</span>
+        <span className="chart-single-date">{data[0].label}</span>
+      </div>
+    );
+  }
+
+  const W = 320, H = 110, PAD = 18;
+  const ys = data.map(d => d.y);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const rangeY = maxY - minY || 0.1;
+
+  const toX = (i: number) => PAD + (i / (data.length - 1)) * (W - PAD * 2);
+  const toY = (v: number) => PAD + (1 - (v - minY) / rangeY) * (H - PAD * 2);
+
+  const pts = data.map((d, i) => ({ sx: toX(i), sy: toY(d.y), label: d.label, val: d.y }));
+
+  const linePath = pts.reduce((acc, p, i) => {
+    if (i === 0) return `M ${p.sx.toFixed(1)} ${p.sy.toFixed(1)}`;
+    const prev = pts[i - 1];
+    const cpx = ((prev.sx + p.sx) / 2).toFixed(1);
+    return `${acc} C ${cpx} ${prev.sy.toFixed(1)} ${cpx} ${p.sy.toFixed(1)} ${p.sx.toFixed(1)} ${p.sy.toFixed(1)}`;
+  }, '');
+
+  const areaPath = `${linePath} L ${pts[pts.length - 1].sx.toFixed(1)} ${H} L ${pts[0].sx.toFixed(1)} ${H} Z`;
+
+  const latestDelta = data[data.length - 1].y - data[data.length - 2].y;
+
+  return (
+    <div className="chart-wrap">
+      <div className="chart-trend">
+        <span className="chart-latest" style={{ color }}>{data[data.length - 1].y} {unit}</span>
+        {latestDelta !== 0 && (
+          <span className={`chart-delta ${latestDelta < 0 ? 'down' : 'up'}`}>
+            {latestDelta > 0 ? '▲' : '▼'} {Math.abs(latestDelta).toFixed(1)}
+          </span>
+        )}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, overflow: 'visible', display: 'block' }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={color} stopOpacity="0.01" />
+          </linearGradient>
+        </defs>
+        {[0.25, 0.5, 0.75].map(t => (
+          <line key={t}
+            x1={PAD} y1={(PAD + (1 - t) * (H - PAD * 2)).toFixed(1)}
+            x2={W - PAD} y2={(PAD + (1 - t) * (H - PAD * 2)).toFixed(1)}
+            stroke="#e8eed8" strokeWidth="1" strokeDasharray="4 4"
+          />
+        ))}
+        <path d={areaPath} fill={`url(#${gradId})`} />
+        <path d={linePath} stroke={color} strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        {pts.map((p, i) => (
+          <g key={i}>
+            <circle cx={p.sx.toFixed(1)} cy={p.sy.toFixed(1)} r="5" fill="white" stroke={color} strokeWidth="2.2" />
+            {(i === 0 || i === pts.length - 1 || data.length <= 4) && (
+              <text x={p.sx.toFixed(1)} y={(p.sy - 9).toFixed(1)} textAnchor="middle" fontSize="9.5" fill={color} fontWeight="700">{p.val}</text>
+            )}
+          </g>
+        ))}
+      </svg>
+      <div className="chart-labels">
+        {pts.map((p, i) => (
+          <span key={i} style={{ left: `${(p.sx / W) * 100}%` }}>{p.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [showFV, setShowFV] = useState(true);
@@ -126,14 +214,18 @@ function App() {
   const [mealEstimation, setMealEstimation] = useState<typeof MOCK_ESTIMATIONS[number] | null>(null);
   const [mealManualCal, setMealManualCal] = useState('');
   const [mealMemo, setMealMemo] = useState('');
+  const [showMealSuccess, setShowMealSuccess] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [newKnowledge, setNewKnowledge] = useState({ category: '食事', title: '', note: '' });
+  const [waterDone, setWaterDone] = useState<boolean>(() => getStorage(`water_${todayString}`, false));
+  const [graphMetric, setGraphMetric] = useState<GraphMetric>('weight');
 
   useEffect(() => { setStorage('records', records); }, [records]);
   useEffect(() => { setStorage('meals_v2', meals); }, [meals]);
   useEffect(() => { setStorage('exercises', exercises); }, [exercises]);
   useEffect(() => { setStorage('knowledge', knowledge); }, [knowledge]);
+  useEffect(() => { setStorage(`water_${todayString}`, waterDone); }, [waterDone]);
 
   const todayRecord = useMemo(() => records.find(r => r.date === todayString) ?? emptyRecord(todayString), [records]);
   const todayMeals = useMemo(() => meals.filter(m => m.date === todayString), [meals]);
@@ -141,6 +233,25 @@ function App() {
     const cal = m.manualCalories ? parseInt(m.manualCalories) : (m.estimatedCalories ?? 0);
     return sum + (isNaN(cal) ? 0 : cal);
   }, 0), [todayMeals]);
+
+  const weightPoints = useMemo<ChartPoint[]>(() =>
+    records.filter(r => r.weight !== '' && !isNaN(parseFloat(r.weight))).slice(-7)
+      .map(r => ({ y: parseFloat(r.weight), label: r.date.slice(5) })),
+    [records]);
+
+  const waistPoints = useMemo<ChartPoint[]>(() =>
+    records.filter(r => r.waist !== '' && !isNaN(parseFloat(r.waist))).slice(-7)
+      .map(r => ({ y: parseFloat(r.waist), label: r.date.slice(5) })),
+    [records]);
+
+  const walkDone = exercises.find(e => e.id === 'e1')?.checked ?? false;
+  const missions = [
+    { id: 'food', label: '食事写真を記録する', done: todayMeals.length > 0, onToggle: () => setActiveTab('meal') },
+    { id: 'weight', label: '体重を入力する', done: todayRecord.weight !== '', onToggle: () => setActiveTab('log') },
+    { id: 'water', label: '水を1.5L以上飲む', done: waterDone, onToggle: () => setWaterDone(v => !v) },
+    { id: 'walk', label: '10分以上歩く', done: walkDone, onToggle: () => toggleExercise('e1') },
+  ];
+  const missionPercent = Math.round(missions.filter(m => m.done).length / missions.length * 100);
 
   const saveRecord = () => {
     setRecords(prev => {
@@ -160,8 +271,7 @@ function App() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const base64 = reader.result as string;
-      setMealPhoto(base64);
+      setMealPhoto(reader.result as string);
       const est = MOCK_ESTIMATIONS[Math.floor(Math.random() * MOCK_ESTIMATIONS.length)];
       setMealEstimation(est);
       setMealManualCal(String(est.calories));
@@ -199,6 +309,8 @@ function App() {
     setMealEstimation(null);
     setMealManualCal('');
     setMealMemo('');
+    setShowMealSuccess(true);
+    setTimeout(() => setShowMealSuccess(false), 1800);
   };
 
   const cancelMealForm = () => {
@@ -215,33 +327,66 @@ function App() {
     setNewKnowledge({ category: '食事', title: '', note: '' });
   };
 
+  // ─── FV ───────────────────────────────────────────────
   if (showFV) {
     return (
       <div className="fv-screen">
+        <div className="fv-overlay" />
         <img src="/FV.png" alt="内臓脂肪ダイエット" className="fv-image" />
-        <div className="fv-button-wrap">
+        <div className="fv-bottom">
+          <p className="fv-tagline">内側から変わる、未来の自分へ</p>
           <button className="fv-button" onClick={() => setShowFV(false)}>
             タップする
           </button>
+          <div className="fv-arrow">↓</div>
         </div>
       </div>
     );
   }
 
+  // ─── App ─────────────────────────────────────────────
   return (
     <div className="app-shell">
+      {showMealSuccess && (
+        <div className="meal-success">
+          <div className="meal-success-inner">
+            <div className="meal-success-icon">✓</div>
+            <div className="meal-success-text">記録完了！</div>
+          </div>
+        </div>
+      )}
+
       <header className="app-header">
         <p className="eyebrow">内臓脂肪ダイエット</p>
         <h1>習慣で整える健康管理</h1>
-        <p className="header-note">生活習慣の改善をサポートするアプリです。</p>
       </header>
 
       <main className="content">
 
-        {/* ホーム */}
+        {/* ─── ホーム ─── */}
         {activeTab === 'home' && (
           <section>
-            <div className="grid-3">
+            {/* ミッションカード */}
+            <div className="section-card mission-card">
+              <div className="mission-header">
+                <div className="section-title" style={{ marginBottom: 0 }}>今日のミッション</div>
+                <div className="mission-percent">{missionPercent}%</div>
+              </div>
+              <div className="mission-bar-track">
+                <div className="mission-bar-fill" style={{ width: `${missionPercent}%` }} />
+              </div>
+              <ul className="mission-list">
+                {missions.map(m => (
+                  <li key={m.id} className={m.done ? 'done' : ''} onClick={m.onToggle}>
+                    <span className="mission-check">{m.done ? '✓' : ''}</span>
+                    {m.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* 統計カード */}
+            <div className="grid-3" style={{ marginTop: 14 }}>
               <div className="stat-card">
                 <div className="stat-label">今日の体重</div>
                 <div className="stat-value">{todayRecord.weight || '－'}</div>
@@ -259,26 +404,9 @@ function App() {
               </div>
             </div>
 
-            <div className="section-card" style={{ marginTop: 16 }}>
-              <div className="section-title">今日やること</div>
-              <ul className="today-tasks">
-                <li className={todayMeals.length > 0 ? 'done' : ''}>
-                  <span className="task-icon">{todayMeals.length > 0 ? '✓' : '○'}</span>
-                  食事写真を1枚記録する
-                </li>
-                <li className={exercises.some(e => e.checked) ? 'done' : ''}>
-                  <span className="task-icon">{exercises.some(e => e.checked) ? '✓' : '○'}</span>
-                  15分歩く
-                </li>
-                <li>
-                  <span className="task-icon">○</span>
-                  水分を意識する
-                </li>
-              </ul>
-            </div>
-
+            {/* 今日の食事 */}
             {todayMeals.length > 0 && (
-              <div className="section-card" style={{ marginTop: 16 }}>
+              <div className="section-card" style={{ marginTop: 14 }}>
                 <div className="section-title">今日の食事</div>
                 {(['朝', '昼', '夜', '間食'] as MealType[]).map(type => {
                   const ms = todayMeals.filter(m => m.type === type);
@@ -300,37 +428,29 @@ function App() {
           </section>
         )}
 
-        {/* 記録 */}
+        {/* ─── 記録 ─── */}
         {activeTab === 'log' && (
           <section className="section-card">
             <div className="section-title">今日の記録</div>
-            <p className="hint-text">毎日すべて入力する必要はありません。体重・腹囲・食事写真だけでもOKです。</p>
+            <p className="hint-text">毎日すべて入力する必要はありません。体重・腹囲だけでもOKです。</p>
 
             <div className="form-grid">
               <label className="field">
                 <span>体重 (kg)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={newRecord.weight}
+                <input type="number" inputMode="decimal" value={newRecord.weight}
                   onChange={e => setNewRecord({ ...newRecord, weight: e.target.value })}
-                  placeholder="例: 72.5"
-                />
+                  placeholder="例: 72.5" />
               </label>
               <label className="field">
                 <span>腹囲 (cm)</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={newRecord.waist}
+                <input type="number" inputMode="decimal" value={newRecord.waist}
                   onChange={e => setNewRecord({ ...newRecord, waist: e.target.value })}
-                  placeholder="例: 88.0"
-                />
+                  placeholder="例: 88.0" />
               </label>
             </div>
 
             <button className="collapse-btn" onClick={() => setOptionalOpen(v => !v)}>
-              {optionalOpen ? '▲ 任意記録を閉じる' : '▼ 任意記録を開く（体脂肪・血圧・睡眠など）'}
+              {optionalOpen ? '▲ 詳細入力を閉じる' : '▼ 詳細入力を開く（体脂肪・血圧・睡眠など）'}
             </button>
 
             {optionalOpen && (
@@ -338,20 +458,16 @@ function App() {
                 {optionalFields.map(({ key, label, placeholder }) => (
                   <label key={key} className="field">
                     <span>{label}</span>
-                    <input
-                      value={newRecord[key]}
+                    <input value={newRecord[key]}
                       onChange={e => setNewRecord({ ...newRecord, [key]: e.target.value })}
-                      placeholder={placeholder}
-                    />
+                      placeholder={placeholder} />
                   </label>
                 ))}
                 <label className="field field-full">
                   <span>メモ</span>
-                  <textarea
-                    value={newRecord.memo}
+                  <textarea value={newRecord.memo}
                     onChange={e => setNewRecord({ ...newRecord, memo: e.target.value })}
-                    placeholder="今日の体調や気づき"
-                  />
+                    placeholder="今日の体調や気づき" />
                 </label>
               </div>
             )}
@@ -378,7 +494,7 @@ function App() {
           </section>
         )}
 
-        {/* 食事 */}
+        {/* ─── 食事 ─── */}
         {activeTab === 'meal' && (
           <section className="section-card">
             <div className="section-title">食事記録</div>
@@ -390,13 +506,8 @@ function App() {
               </div>
             )}
 
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={handlePhotoUpload}
-            />
+            <input ref={photoInputRef} type="file" accept="image/*"
+              style={{ display: 'none' }} onChange={handlePhotoUpload} />
 
             {(['朝', '昼', '夜', '間食'] as MealType[]).map(type => (
               <div key={type} className="meal-section">
@@ -407,28 +518,35 @@ function App() {
                   )}
                 </div>
 
-                {todayMeals.filter(m => m.type === type).map(m => (
-                  <div key={m.id} className="meal-record-card">
-                    {m.photo && <img src={m.photo} alt="食事写真" className="meal-thumb" />}
-                    <div className="meal-record-body">
-                      {m.estimatedName && <div className="meal-record-name">{m.estimatedName}</div>}
-                      <div className="meal-record-cal">
-                        {m.manualCalories || m.estimatedCalories} kcal
+                {todayMeals.filter(m => m.type === type).map(m => {
+                  const cal = parseInt(m.manualCalories || String(m.estimatedCalories ?? '0'));
+                  const badge = !isNaN(cal) && cal > 0 ? calorieBadge(cal) : null;
+                  return (
+                    <div key={m.id} className="meal-record-card">
+                      {m.photo && <img src={m.photo} alt="食事写真" className="meal-thumb" />}
+                      <div className="meal-record-body">
+                        {m.estimatedName && <div className="meal-record-name">{m.estimatedName}</div>}
+                        <div className="meal-record-cal-row">
+                          <span className="meal-record-cal">{!isNaN(cal) ? cal : '－'} kcal</span>
+                          {badge && <span className={`cal-eval-badge ${badge.cls}`}>{badge.label}</span>}
+                        </div>
                         {m.protein != null && (
-                          <span className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</span>
+                          <div className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</div>
                         )}
+                        {m.memo && <div className="meal-record-memo">{m.memo}</div>}
                       </div>
-                      {m.memo && <div className="meal-record-memo">{m.memo}</div>}
+                      <button className="delete-btn" onClick={() => setMeals(prev => prev.filter(x => x.id !== m.id))}>✕</button>
                     </div>
-                    <button className="delete-btn" onClick={() => setMeals(prev => prev.filter(x => x.id !== m.id))}>✕</button>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {activeMealType === type && (
                   <div className="meal-form">
                     {!mealPhoto ? (
                       <button className="photo-upload-btn" onClick={() => photoInputRef.current?.click()}>
-                        📷 食事写真を追加
+                        <span className="photo-upload-icon">📷</span>
+                        <span>食事写真を追加</span>
+                        <span className="photo-upload-sub">タップして写真を選ぶ</span>
                       </button>
                     ) : (
                       <div>
@@ -452,12 +570,8 @@ function App() {
                         </div>
                         <label className="field" style={{ marginTop: 12 }}>
                           <span>カロリーを修正 (kcal)</span>
-                          <input
-                            type="number"
-                            inputMode="numeric"
-                            value={mealManualCal}
-                            onChange={e => setMealManualCal(e.target.value)}
-                          />
+                          <input type="number" inputMode="numeric" value={mealManualCal}
+                            onChange={e => setMealManualCal(e.target.value)} />
                         </label>
                       </div>
                     )}
@@ -465,23 +579,15 @@ function App() {
                     {!mealEstimation && (
                       <label className="field" style={{ marginTop: 12 }}>
                         <span>カロリー (kcal)</span>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          value={mealManualCal}
-                          onChange={e => setMealManualCal(e.target.value)}
-                          placeholder="手動で入力"
-                        />
+                        <input type="number" inputMode="numeric" value={mealManualCal}
+                          onChange={e => setMealManualCal(e.target.value)} placeholder="手動で入力" />
                       </label>
                     )}
 
                     <label className="field" style={{ marginTop: 12 }}>
                       <span>メモ</span>
-                      <input
-                        value={mealMemo}
-                        onChange={e => setMealMemo(e.target.value)}
-                        placeholder="例: 塩分少なめにした"
-                      />
+                      <input value={mealMemo} onChange={e => setMealMemo(e.target.value)}
+                        placeholder="例: 塩分少なめにした" />
                     </label>
 
                     <div className="form-actions">
@@ -495,7 +601,29 @@ function App() {
           </section>
         )}
 
-        {/* 運動 */}
+        {/* ─── グラフ ─── */}
+        {activeTab === 'graph' && (
+          <section className="section-card">
+            <div className="section-title">記録グラフ</div>
+            <div className="graph-metric-tabs">
+              <button className={`graph-metric-btn ${graphMetric === 'weight' ? 'active' : ''}`}
+                onClick={() => setGraphMetric('weight')}>体重 (kg)</button>
+              <button className={`graph-metric-btn ${graphMetric === 'waist' ? 'active' : ''}`}
+                onClick={() => setGraphMetric('waist')}>腹囲 (cm)</button>
+            </div>
+            <LineChart
+              data={graphMetric === 'weight' ? weightPoints : waistPoints}
+              color={graphMetric === 'weight' ? '#5aad3e' : '#4a8fba'}
+              gradId={graphMetric === 'weight' ? 'grad-weight' : 'grad-waist'}
+              unit={graphMetric === 'weight' ? 'kg' : 'cm'}
+            />
+            <p style={{ fontSize: '0.78rem', color: '#8a9a82', marginTop: 16, textAlign: 'center' }}>
+              直近7件のデータを表示しています
+            </p>
+          </section>
+        )}
+
+        {/* ─── 運動 ─── */}
         {activeTab === 'move' && (
           <section className="section-card">
             <div className="section-title">運動</div>
@@ -507,10 +635,8 @@ function App() {
                     <p>{item.description}</p>
                     <small>{item.duration}・{item.level}</small>
                   </div>
-                  <button
-                    className={item.checked ? 'secondary-button checked' : 'secondary-button'}
-                    onClick={() => toggleExercise(item.id)}
-                  >
+                  <button className={item.checked ? 'secondary-button checked' : 'secondary-button'}
+                    onClick={() => toggleExercise(item.id)}>
                     {item.checked ? '完了' : '実施'}
                   </button>
                 </div>
@@ -519,7 +645,7 @@ function App() {
           </section>
         )}
 
-        {/* 豆知識 */}
+        {/* ─── 豆知識 ─── */}
         {activeTab === 'tips' && (
           <section className="section-card">
             <div className="section-title">豆知識フォルダ</div>
@@ -533,11 +659,15 @@ function App() {
               </label>
               <label className="field">
                 <span>タイトル</span>
-                <input value={newKnowledge.title} onChange={e => setNewKnowledge({ ...newKnowledge, title: e.target.value })} placeholder="豆知識のタイトル" />
+                <input value={newKnowledge.title}
+                  onChange={e => setNewKnowledge({ ...newKnowledge, title: e.target.value })}
+                  placeholder="豆知識のタイトル" />
               </label>
               <label className="field field-full">
                 <span>詳細</span>
-                <textarea value={newKnowledge.note} onChange={e => setNewKnowledge({ ...newKnowledge, note: e.target.value })} placeholder="詳しいメモを入力" />
+                <textarea value={newKnowledge.note}
+                  onChange={e => setNewKnowledge({ ...newKnowledge, note: e.target.value })}
+                  placeholder="詳しいメモを入力" />
               </label>
             </div>
             <button className="primary-button" onClick={addKnowledge}>豆知識を追加</button>
@@ -549,7 +679,8 @@ function App() {
                     <h3>{item.title}</h3>
                     <p>{item.note}</p>
                   </div>
-                  <button className="tertiary-button" onClick={() => setKnowledge(prev => prev.filter(v => v.id !== item.id))}>削除</button>
+                  <button className="tertiary-button"
+                    onClick={() => setKnowledge(prev => prev.filter(v => v.id !== item.id))}>削除</button>
                 </div>
               ))}
             </div>
@@ -558,11 +689,21 @@ function App() {
       </main>
 
       <nav className="bottom-nav">
-        <button className={activeTab === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={() => setActiveTab('home')}>ホーム</button>
-        <button className={activeTab === 'log' ? 'nav-btn active' : 'nav-btn'} onClick={() => setActiveTab('log')}>記録</button>
-        <button className={activeTab === 'meal' ? 'nav-btn active' : 'nav-btn'} onClick={() => setActiveTab('meal')}>食事</button>
-        <button className={activeTab === 'move' ? 'nav-btn active' : 'nav-btn'} onClick={() => setActiveTab('move')}>運動</button>
-        <button className={activeTab === 'tips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setActiveTab('tips')}>豆知識</button>
+        {([
+          { key: 'home', icon: '🏠', label: 'ホーム' },
+          { key: 'log',  icon: '✏️', label: '記録'  },
+          { key: 'meal', icon: '🍽', label: '食事'  },
+          { key: 'graph',icon: '📈', label: 'グラフ' },
+          { key: 'move', icon: '🏃', label: '運動'  },
+          { key: 'tips', icon: '💡', label: '豆知識' },
+        ] as const).map(({ key, icon, label }) => (
+          <button key={key}
+            className={activeTab === key ? 'nav-btn active' : 'nav-btn'}
+            onClick={() => setActiveTab(key)}>
+            <span className="nav-icon">{icon}</span>
+            <span>{label}</span>
+          </button>
+        ))}
       </nav>
     </div>
   );
