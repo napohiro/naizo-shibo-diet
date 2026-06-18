@@ -108,6 +108,7 @@ function setStorage<T>(key: string, value: T) {
 const todayString = new Date().toISOString().slice(0, 10);
 
 function App() {
+  const [showFV, setShowFV] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('home');
   const [records, setRecords] = useState<TodayRecord[]>(() => getStorage('records', [emptyRecord(todayString)]));
   const [meals, setMeals] = useState<MealRecord[]>(() => getStorage('meals_v2', []));
@@ -213,6 +214,19 @@ function App() {
     setKnowledge(prev => [...prev, { id: `k-${Date.now()}`, ...newKnowledge }]);
     setNewKnowledge({ category: '食事', title: '', note: '' });
   };
+
+  if (showFV) {
+    return (
+      <div className="fv-screen">
+        <img src="/FV.png" alt="内臓脂肪ダイエット" className="fv-image" />
+        <div className="fv-button-wrap">
+          <button className="fv-button" onClick={() => setShowFV(false)}>
+            タップする
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
