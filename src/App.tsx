@@ -212,15 +212,15 @@ async function analyzeWithGemini(base64Image: string): Promise<MealEstimation> {
     generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
   };
 
-  console.log('[Gemini] 🚀 送信開始 model: gemini-1.5-flash');
+  // ── Step 3: API呼び出し ──────────────────────────────────
+  const MODEL = 'gemini-2.0-flash';
+
+  console.log('[Gemini] 🚀 送信開始 model:', MODEL);
   console.log('[Gemini] リクエスト構造:', JSON.stringify({
-    model: 'gemini-1.5-flash',
+    model: MODEL,
     parts: ['[image/jpeg base64 ' + sizeKB + 'KB]', '(prompt text)'],
     generationConfig: requestBody.generationConfig,
   }));
-
-  // ── Step 3: API呼び出し ──────────────────────────────────
-  const MODEL = 'gemini-1.5-flash';
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
 
   let res: Response;
