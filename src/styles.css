@@ -610,6 +610,153 @@ textarea { min-height: 80px; resize: vertical }
   line-height: 1;
 }
 
+/* ─── カード操作ボタン ─── */
+.card-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.card-edit-btn {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1.5px solid #b4d4a8;
+  background: #f0f9eb;
+  color: #3a6028;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  min-width: 44px;
+  text-align: center;
+  transition: background 0.12s;
+}
+.card-edit-btn:active { background: #ddf0d0 }
+
+.card-delete-btn {
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1.5px solid #f4b8b8;
+  background: #fff5f5;
+  color: #c03030;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  min-width: 44px;
+  text-align: center;
+  transition: background 0.12s;
+}
+.card-delete-btn:active { background: #fde0e0 }
+
+/* ─── 食事記録 編集フォーム ─── */
+.meal-edit-form {
+  padding: 4px 0;
+}
+
+.meal-edit-title {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #3a6028;
+  margin-bottom: 10px;
+  letter-spacing: 0.03em;
+}
+
+.meal-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+/* ─── ホーム 食事展開 ─── */
+.home-meal-row-tap {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s;
+  border-radius: 10px;
+}
+.home-meal-row-tap:active { background: #eef6e8 }
+
+.home-expand-icon {
+  font-size: 0.65rem;
+  color: #9aaa90;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.home-meal-detail {
+  margin: 4px 0 8px;
+  border: 1px solid #dde8d4;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.home-meal-detail-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef5e8;
+}
+.home-meal-detail-item:last-child { border-bottom: none }
+
+.home-detail-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.home-detail-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.home-detail-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-detail-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e3020;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.home-detail-cal {
+  font-size: 0.78rem;
+  color: #3e6830;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+
+.home-detail-memo {
+  font-size: 0.72rem;
+  color: #7a8a6a;
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.home-detail-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 /* ─── 食事入力フォーム ─── */
 .meal-form {
   background: #f2fbee;

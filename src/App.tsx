@@ -41,6 +41,18 @@ type MealRecord = {
   aiAnalyzed?: boolean;
 };
 
+type MealEditDraft = {
+  id: string;
+  type: MealType;
+  estimatedName: string;
+  manualCalories: string;
+  protein: string;
+  fat: string;
+  carbs: string;
+  memo: string;
+  visceralFatRisk: VisceralFatRisk | '';
+};
+
 type TodayRecord = {
   date: string;
   weight: string;
@@ -321,10 +333,13 @@ function App() {
   const [mealEstimation, setMealEstimation] = useState<MealEstimation | null>(null);
   const [mealManualCal, setMealManualCal] = useState('');
   const [mealMemo, setMealMemo] = useState('');
-  const [showMealSuccess, setShowMealSuccess] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [editingMealId, setEditingMealId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<MealEditDraft | null>(null);
+  const [expandedHomeMealType, setExpandedHomeMealType] = useState<MealType | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [newKnowledge, setNewKnowledge] = useState({ category: '食事', title: '', note: '' });
@@ -391,8 +406,59 @@ function App() {
     reader.readAsDataURL(file);
   };
 
-  const updateMealCal = (id: string, value: string) => {
-    setMeals(prev => prev.map(m => m.id === id ? { ...m, manualCalories: value } : m));
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 1800);
+  };
+
+  const deleteMeal = (id: string) => {
+    if (!window.confirm('この食事記録を削除しますか？')) return;
+    setMeals(prev => prev.filter(m => m.id !== id));
+    showToast('削除しました');
+  };
+
+  const startEditMeal = (meal: MealRecord) => {
+    setEditingMealId(meal.id);
+    setEditDraft({
+      id: meal.id,
+      type: meal.type,
+      estimatedName: meal.estimatedName,
+      manualCalories: meal.manualCalories || String(meal.estimatedCalories ?? ''),
+      protein: String(meal.protein ?? ''),
+      fat: String(meal.fat ?? ''),
+      carbs: String(meal.carbs ?? ''),
+      memo: meal.memo,
+      visceralFatRisk: meal.visceralFatRisk ?? '',
+    });
+  };
+
+  const saveEditMeal = () => {
+    if (!editDraft) return;
+    setMeals(prev => prev.map(m => {
+      if (m.id !== editDraft.id) return m;
+      const p = editDraft.protein !== '' ? Number(editDraft.protein) : null;
+      const f = editDraft.fat !== '' ? Number(editDraft.fat) : null;
+      const c = editDraft.carbs !== '' ? Number(editDraft.carbs) : null;
+      return {
+        ...m,
+        type: editDraft.type,
+        estimatedName: editDraft.estimatedName,
+        manualCalories: editDraft.manualCalories,
+        protein: p != null && !isNaN(p) ? p : m.protein,
+        fat: f != null && !isNaN(f) ? f : m.fat,
+        carbs: c != null && !isNaN(c) ? c : m.carbs,
+        memo: editDraft.memo,
+        visceralFatRisk: editDraft.visceralFatRisk !== '' ? editDraft.visceralFatRisk : m.visceralFatRisk,
+      };
+    }));
+    setEditingMealId(null);
+    setEditDraft(null);
+    showToast('更新しました');
+  };
+
+  const cancelEditMeal = () => {
+    setEditingMealId(null);
+    setEditDraft(null);
   };
 
   const startAiAnalysis = async () => {
@@ -457,8 +523,7 @@ function App() {
     setMealMemo('');
     setHasAnalyzed(false);
     setAiError(null);
-    setShowMealSuccess(true);
-    setTimeout(() => setShowMealSuccess(false), 1800);
+    showToast('記録しました');
   };
 
   const cancelMealForm = () => {
@@ -497,11 +562,11 @@ function App() {
   // ─── App ─────────────────────────────────────────────
   return (
     <div className="app-shell">
-      {showMealSuccess && (
+      {toastMsg && (
         <div className="meal-success">
           <div className="meal-success-inner">
             <div className="meal-success-icon">✓</div>
-            <div className="meal-success-text">記録しました</div>
+            <div className="meal-success-text">{toastMsg}</div>
           </div>
         </div>
       )}
@@ -566,18 +631,61 @@ function App() {
                     return s + (isNaN(c) ? 0 : c);
                   }, 0);
                   const photos = ms.filter(m => m.photo).map(m => m.photo!);
+                  const isExpanded = expandedHomeMealType === type;
                   return (
-                    <div key={type} className="home-meal-row">
-                      <span className="meal-type-badge">{type}</span>
-                      {photos.length > 0 && (
-                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                          {photos.slice(0, 2).map((src, i) => (
-                            <img key={i} src={src} alt="食事" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
-                          ))}
+                    <div key={type}>
+                      <div
+                        className="home-meal-row home-meal-row-tap"
+                        onClick={() => setExpandedHomeMealType(isExpanded ? null : type)}
+                      >
+                        <span className="meal-type-badge">{type}</span>
+                        {photos.length > 0 && (
+                          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                            {photos.slice(0, 2).map((src, i) => (
+                              <img key={i} src={src} alt="食事" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
+                            ))}
+                          </div>
+                        )}
+                        <span className="home-meal-name">{ms.map(m => m.estimatedName || 'メモあり').join('、')}</span>
+                        <span className="cal-badge">{typeCal} kcal</span>
+                        <span className="home-expand-icon">{isExpanded ? '▲' : '▼'}</span>
+                      </div>
+                      {isExpanded && (
+                        <div className="home-meal-detail">
+                          {ms.map(m => {
+                            const cal = parseInt(m.manualCalories || String(m.estimatedCalories ?? '0'));
+                            return (
+                              <div key={m.id} className="home-meal-detail-item">
+                                <div className="home-detail-left">
+                                  {m.photo && (
+                                    <img src={m.photo} alt="食事" className="home-detail-thumb" />
+                                  )}
+                                  <div className="home-detail-info">
+                                    <div className="home-detail-name">{m.estimatedName || 'メモあり'}</div>
+                                    <div className="home-detail-cal">{isNaN(cal) ? '－' : cal} kcal</div>
+                                    {m.visceralFatRisk && (
+                                      <span className={`risk-badge risk-${m.visceralFatRisk}`} style={{ fontSize: '0.7rem' }}>
+                                        リスク：{m.visceralFatRisk}
+                                      </span>
+                                    )}
+                                    {m.memo && <div className="home-detail-memo">{m.memo}</div>}
+                                  </div>
+                                </div>
+                                <div className="home-detail-actions">
+                                  <button
+                                    className="card-edit-btn"
+                                    onClick={e => { e.stopPropagation(); startEditMeal(m); setActiveTab('meal'); setExpandedHomeMealType(null); }}
+                                  >編集</button>
+                                  <button
+                                    className="card-delete-btn"
+                                    onClick={e => { e.stopPropagation(); deleteMeal(m.id); }}
+                                  >削除</button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
-                      <span className="home-meal-name">{ms.map(m => m.estimatedName || 'メモあり').join('、')}</span>
-                      <span className="cal-badge">{typeCal} kcal</span>
                     </div>
                   );
                 })}
@@ -679,51 +787,138 @@ function App() {
                 {todayMeals.filter(m => m.type === type).map(m => {
                   const cal = parseInt(m.manualCalories || String(m.estimatedCalories ?? '0'));
                   const badge = !isNaN(cal) && cal > 0 ? calorieBadge(cal) : null;
+                  const isEditing = editingMealId === m.id;
                   return (
                     <div key={m.id} className="meal-record-card" style={{ flexDirection: 'column', gap: 8 }}>
-                      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                        {m.photo && <img src={m.photo} alt="食事写真" className="meal-thumb" />}
-                        <div className="meal-record-body">
-                          <div style={{ marginBottom: 5 }}>
-                            <span className="meal-type-badge">{m.type === '朝' ? '朝食' : m.type === '昼' ? '昼食' : m.type === '夜' ? '夕食' : '間食'}</span>
+                      {isEditing && editDraft ? (
+                        /* ── 編集フォーム ── */
+                        <div className="meal-edit-form">
+                          <div className="meal-edit-title">食事記録を編集</div>
+                          <div className="meal-edit-grid">
+                            <label className="field">
+                              <span>食事区分</span>
+                              <select
+                                value={editDraft.type}
+                                onChange={e => setEditDraft({ ...editDraft, type: e.target.value as MealType })}
+                              >
+                                <option value="朝">朝食</option>
+                                <option value="昼">昼食</option>
+                                <option value="夜">夕食</option>
+                                <option value="間食">間食</option>
+                              </select>
+                            </label>
+                            <label className="field">
+                              <span>料理名</span>
+                              <input
+                                value={editDraft.estimatedName}
+                                onChange={e => setEditDraft({ ...editDraft, estimatedName: e.target.value })}
+                                placeholder="料理名"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>カロリー (kcal)</span>
+                              <input
+                                type="number" inputMode="numeric"
+                                value={editDraft.manualCalories}
+                                onChange={e => setEditDraft({ ...editDraft, manualCalories: e.target.value })}
+                                placeholder="例: 600"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>P たんぱく質 (g)</span>
+                              <input
+                                type="number" inputMode="numeric"
+                                value={editDraft.protein}
+                                onChange={e => setEditDraft({ ...editDraft, protein: e.target.value })}
+                                placeholder="例: 30"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>F 脂質 (g)</span>
+                              <input
+                                type="number" inputMode="numeric"
+                                value={editDraft.fat}
+                                onChange={e => setEditDraft({ ...editDraft, fat: e.target.value })}
+                                placeholder="例: 15"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>C 炭水化物 (g)</span>
+                              <input
+                                type="number" inputMode="numeric"
+                                value={editDraft.carbs}
+                                onChange={e => setEditDraft({ ...editDraft, carbs: e.target.value })}
+                                placeholder="例: 70"
+                              />
+                            </label>
+                            <label className="field">
+                              <span>内臓脂肪リスク</span>
+                              <select
+                                value={editDraft.visceralFatRisk}
+                                onChange={e => setEditDraft({ ...editDraft, visceralFatRisk: e.target.value as VisceralFatRisk | '' })}
+                              >
+                                <option value="">未設定</option>
+                                <option value="低">低</option>
+                                <option value="中">中</option>
+                                <option value="高">高</option>
+                              </select>
+                            </label>
+                            <label className="field field-full">
+                              <span>メモ</span>
+                              <input
+                                value={editDraft.memo}
+                                onChange={e => setEditDraft({ ...editDraft, memo: e.target.value })}
+                                placeholder="例: 塩分少なめにした"
+                              />
+                            </label>
                           </div>
-                          {m.estimatedName && <div className="meal-record-name">{m.estimatedName}</div>}
-                          <div className="meal-record-cal-row">
-                            <span className="meal-record-cal">{!isNaN(cal) ? cal : '－'} kcal</span>
-                            {badge && <span className={`cal-eval-badge ${badge.cls}`}>{badge.label}</span>}
+                          <div className="form-actions">
+                            <button className="primary-button save-btn" onClick={saveEditMeal}>更新</button>
+                            <button className="cancel-button" onClick={cancelEditMeal}>キャンセル</button>
                           </div>
-                          {m.protein != null && (
-                            <div className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</div>
-                          )}
-                          {(m.vegetableLevel || m.visceralFatRisk) && (
-                            <div className="ai-metrics-row" style={{ marginTop: 4 }}>
-                              {m.vegetableLevel && (
-                                <span className={`ai-veggie veggie-${m.vegetableLevel}`} style={{ fontSize: '0.72rem' }}>
-                                  野菜：{m.vegetableLevel}
-                                </span>
-                              )}
-                              {m.visceralFatRisk && (
-                                <span className={`risk-badge risk-${m.visceralFatRisk}`} style={{ fontSize: '0.72rem' }}>
-                                  リスク：{m.visceralFatRisk}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {m.memo && <div className="meal-record-memo">{m.memo}</div>}
                         </div>
-                        <button className="delete-btn" onClick={() => setMeals(prev => prev.filter(x => x.id !== m.id))}>✕</button>
-                      </div>
-                      <label className="field" style={{ marginTop: 2 }}>
-                        <span style={{ fontSize: '0.75rem' }}>カロリー修正 (kcal)</span>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          value={m.manualCalories}
-                          onChange={e => updateMealCal(m.id, e.target.value)}
-                          placeholder="カロリーを修正"
-                          style={{ padding: '5px 10px', fontSize: '0.85rem' }}
-                        />
-                      </label>
+                      ) : (
+                        /* ── 通常表示 ── */
+                        <>
+                          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                            {m.photo && <img src={m.photo} alt="食事写真" className="meal-thumb" />}
+                            <div className="meal-record-body">
+                              <div style={{ marginBottom: 5 }}>
+                                <span className="meal-type-badge">
+                                  {m.type === '朝' ? '朝食' : m.type === '昼' ? '昼食' : m.type === '夜' ? '夕食' : '間食'}
+                                </span>
+                              </div>
+                              {m.estimatedName && <div className="meal-record-name">{m.estimatedName}</div>}
+                              <div className="meal-record-cal-row">
+                                <span className="meal-record-cal">{!isNaN(cal) ? cal : '－'} kcal</span>
+                                {badge && <span className={`cal-eval-badge ${badge.cls}`}>{badge.label}</span>}
+                              </div>
+                              {m.protein != null && (
+                                <div className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</div>
+                              )}
+                              {(m.vegetableLevel || m.visceralFatRisk) && (
+                                <div className="ai-metrics-row" style={{ marginTop: 4 }}>
+                                  {m.vegetableLevel && (
+                                    <span className={`ai-veggie veggie-${m.vegetableLevel}`} style={{ fontSize: '0.72rem' }}>
+                                      野菜：{m.vegetableLevel}
+                                    </span>
+                                  )}
+                                  {m.visceralFatRisk && (
+                                    <span className={`risk-badge risk-${m.visceralFatRisk}`} style={{ fontSize: '0.72rem' }}>
+                                      リスク：{m.visceralFatRisk}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                              {m.memo && <div className="meal-record-memo">{m.memo}</div>}
+                            </div>
+                            <div className="card-actions">
+                              <button className="card-edit-btn" onClick={() => startEditMeal(m)}>編集</button>
+                              <button className="card-delete-btn" onClick={() => deleteMeal(m.id)}>削除</button>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
                   );
                 })}
