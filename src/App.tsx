@@ -4,6 +4,23 @@ type TabKey = 'home' | 'log' | 'meal' | 'graph' | 'move' | 'tips';
 type MealType = '朝' | '昼' | '夜' | '間食';
 type GraphMetric = 'weight' | 'waist';
 
+type VegetableLevel = '十分' | '普通' | '不足';
+type VisceralFatRisk = '低' | '中' | '高';
+
+type MealEstimation = {
+  name: string;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  note: string;
+  ingredients?: string;
+  vegetableLevel?: VegetableLevel;
+  visceralFatRisk?: VisceralFatRisk;
+  advice?: string[];
+  aiAnalyzed?: boolean;
+};
+
 type MealRecord = {
   id: string;
   date: string;
@@ -17,6 +34,11 @@ type MealRecord = {
   carbs: number | null;
   estimationNote: string;
   memo: string;
+  ingredients?: string;
+  vegetableLevel?: VegetableLevel;
+  visceralFatRisk?: VisceralFatRisk;
+  advice?: string[];
+  aiAnalyzed?: boolean;
 };
 
 type TodayRecord = {
@@ -128,6 +150,69 @@ function compressImage(dataUrl: string, maxWidth = 800, quality = 0.72): Promise
   });
 }
 
+async function analyzeWithGemini(base64Image: string): Promise<MealEstimation> {
+  const apiKey = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) ?? '';
+  if (!apiKey) throw new Error('NO_KEY');
+
+  const base64Data = base64Image.replace(/^data:image\/[^;]+;base64,/, '');
+
+  const prompt = `この食事写真を詳しく分析してください。内臓脂肪ダイエットの観点から以下のJSON形式のみで返してください。それ以外のテキストは一切含めないでください。
+{
+  "dishName": "料理名（日本語）",
+  "ingredients": "主な食材（日本語、カンマ区切り）",
+  "calories": 推定カロリー（整数、kcal）,
+  "protein": タンパク質（整数、g）,
+  "fat": 脂質（整数、g）,
+  "carbs": 炭水化物（整数、g）,
+  "vegetableLevel": "十分" または "普通" または "不足",
+  "visceralFatRisk": "低" または "中" または "高",
+  "advice": ["改善提案1", "改善提案2", "改善提案3"],
+  "note": "内臓脂肪ダイエット観点の一言アドバイス（50文字以内）"
+}`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { inline_data: { mime_type: 'image/jpeg', data: base64Data } },
+          { text: prompt },
+        ]}],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    if (res.status === 429 || res.status === 503) throw new Error('RATE_LIMIT');
+    throw new Error('API_ERROR');
+  }
+
+  const json = await res.json();
+  const text: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('PARSE_ERROR');
+
+  const parsed = JSON.parse(match[0]);
+  return {
+    name: String(parsed.dishName ?? '不明な料理'),
+    ingredients: parsed.ingredients ? String(parsed.ingredients) : undefined,
+    calories: Number(parsed.calories) || 0,
+    protein: Number(parsed.protein) || 0,
+    fat: Number(parsed.fat) || 0,
+    carbs: Number(parsed.carbs) || 0,
+    vegetableLevel: (['十分', '普通', '不足'] as VegetableLevel[]).includes(parsed.vegetableLevel)
+      ? parsed.vegetableLevel as VegetableLevel : undefined,
+    visceralFatRisk: (['低', '中', '高'] as VisceralFatRisk[]).includes(parsed.visceralFatRisk)
+      ? parsed.visceralFatRisk as VisceralFatRisk : undefined,
+    advice: Array.isArray(parsed.advice) ? parsed.advice.map(String) : [],
+    note: String(parsed.note ?? ''),
+    aiAnalyzed: true,
+  };
+}
+
 function calorieBadge(cal: number): { label: string; cls: string } {
   if (cal <= 450) return { label: '適正', cls: 'badge-ok' };
   if (cal <= 700) return { label: 'やや多い', cls: 'badge-warn' };
@@ -233,10 +318,13 @@ function App() {
 
   const [activeMealType, setActiveMealType] = useState<MealType | null>(null);
   const [mealPhoto, setMealPhoto] = useState<string | null>(null);
-  const [mealEstimation, setMealEstimation] = useState<typeof MOCK_ESTIMATIONS[number] | null>(null);
+  const [mealEstimation, setMealEstimation] = useState<MealEstimation | null>(null);
   const [mealManualCal, setMealManualCal] = useState('');
   const [mealMemo, setMealMemo] = useState('');
   const [showMealSuccess, setShowMealSuccess] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const [newKnowledge, setNewKnowledge] = useState({ category: '食事', title: '', note: '' });
@@ -295,9 +383,10 @@ function App() {
     reader.onload = async () => {
       const compressed = await compressImage(reader.result as string);
       setMealPhoto(compressed);
-      const est = MOCK_ESTIMATIONS[Math.floor(Math.random() * MOCK_ESTIMATIONS.length)];
-      setMealEstimation(est);
-      setMealManualCal(String(est.calories));
+      setMealEstimation(null);
+      setMealManualCal('');
+      setHasAnalyzed(false);
+      setAiError(null);
     };
     reader.readAsDataURL(file);
   };
@@ -306,12 +395,37 @@ function App() {
     setMeals(prev => prev.map(m => m.id === id ? { ...m, manualCalories: value } : m));
   };
 
+  const startAiAnalysis = async () => {
+    if (!mealPhoto || isAnalyzing) return;
+    setIsAnalyzing(true);
+    setAiError(null);
+    try {
+      const result = await analyzeWithGemini(mealPhoto);
+      setMealEstimation(result);
+      setMealManualCal(String(result.calories));
+      setHasAnalyzed(true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'API_ERROR';
+      if (msg === 'RATE_LIMIT') {
+        setAiError('AI分析上限に達しました。しばらく待ってから再試行してください。');
+      } else if (msg === 'NO_KEY') {
+        setAiError('APIキーが設定されていません（VITE_GEMINI_API_KEY）。');
+      } else {
+        setAiError('AI分析に失敗しました。写真の保存は続行できます。');
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
   const openMealForm = (type: MealType) => {
     setActiveMealType(type);
     setMealPhoto(null);
     setMealEstimation(null);
     setMealManualCal('');
     setMealMemo('');
+    setHasAnalyzed(false);
+    setAiError(null);
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
@@ -330,12 +444,19 @@ function App() {
       carbs: mealEstimation?.carbs ?? null,
       estimationNote: mealEstimation?.note ?? '',
       memo: mealMemo,
+      ingredients: mealEstimation?.ingredients,
+      vegetableLevel: mealEstimation?.vegetableLevel,
+      visceralFatRisk: mealEstimation?.visceralFatRisk,
+      advice: mealEstimation?.advice,
+      aiAnalyzed: mealEstimation?.aiAnalyzed,
     }]);
     setActiveMealType(null);
     setMealPhoto(null);
     setMealEstimation(null);
     setMealManualCal('');
     setMealMemo('');
+    setHasAnalyzed(false);
+    setAiError(null);
     setShowMealSuccess(true);
     setTimeout(() => setShowMealSuccess(false), 1800);
   };
@@ -346,6 +467,8 @@ function App() {
     setMealEstimation(null);
     setMealManualCal('');
     setMealMemo('');
+    setHasAnalyzed(false);
+    setAiError(null);
   };
 
   const addKnowledge = () => {
@@ -572,6 +695,20 @@ function App() {
                           {m.protein != null && (
                             <div className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</div>
                           )}
+                          {(m.vegetableLevel || m.visceralFatRisk) && (
+                            <div className="ai-metrics-row" style={{ marginTop: 4 }}>
+                              {m.vegetableLevel && (
+                                <span className={`ai-veggie veggie-${m.vegetableLevel}`} style={{ fontSize: '0.72rem' }}>
+                                  野菜：{m.vegetableLevel}
+                                </span>
+                              )}
+                              {m.visceralFatRisk && (
+                                <span className={`risk-badge risk-${m.visceralFatRisk}`} style={{ fontSize: '0.72rem' }}>
+                                  リスク：{m.visceralFatRisk}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {m.memo && <div className="meal-record-memo">{m.memo}</div>}
                         </div>
                         <button className="delete-btn" onClick={() => setMeals(prev => prev.filter(x => x.id !== m.id))}>✕</button>
@@ -606,34 +743,87 @@ function App() {
                       </div>
                     )}
 
-                    {mealEstimation && (
-                      <div className="estimation-card">
-                        <div className="estimation-title">推定結果（デモ）</div>
-                        <div className="estimation-name">{mealEstimation.name}</div>
-                        <div className="pfc-row">
-                          <span>たんぱく質: {mealEstimation.protein}g</span>
-                          <span>脂質: {mealEstimation.fat}g</span>
-                          <span>糖質: {mealEstimation.carbs}g</span>
-                        </div>
-                        <div className="estimation-note">💡 {mealEstimation.note}</div>
-                        <div className="estimation-warning">
-                          ※ 写真からの推定カロリーは目安です。量・調味料・油の量によって実際とは異なります。
-                        </div>
-                        <label className="field" style={{ marginTop: 12 }}>
-                          <span>カロリーを修正 (kcal)</span>
-                          <input type="number" inputMode="numeric" value={mealManualCal}
-                            onChange={e => setMealManualCal(e.target.value)} />
-                        </label>
+                    {/* AI分析ボタン */}
+                    {mealPhoto && (
+                      <div style={{ marginTop: 12 }}>
+                        {!hasAnalyzed ? (
+                          <button
+                            className="ai-analyze-btn"
+                            onClick={startAiAnalysis}
+                            disabled={isAnalyzing}
+                          >
+                            {isAnalyzing ? (
+                              <><span className="ai-spinner" />AI分析中…</>
+                            ) : (
+                              <>🤖 AI分析する</>
+                            )}
+                          </button>
+                        ) : (
+                          <button
+                            className="ai-reanalyze-btn"
+                            onClick={() => { setHasAnalyzed(false); setMealEstimation(null); setAiError(null); }}
+                          >
+                            🔄 再分析する
+                          </button>
+                        )}
                       </div>
                     )}
 
-                    {!mealEstimation && (
-                      <label className="field" style={{ marginTop: 12 }}>
-                        <span>カロリー (kcal)</span>
-                        <input type="number" inputMode="numeric" value={mealManualCal}
-                          onChange={e => setMealManualCal(e.target.value)} placeholder="手動で入力" />
-                      </label>
+                    {/* エラー表示 */}
+                    {aiError && (
+                      <div className="ai-error-box">{aiError}</div>
                     )}
+
+                    {/* AI分析結果 */}
+                    {mealEstimation?.aiAnalyzed && (
+                      <div className="estimation-card ai-result-card">
+                        <div className="estimation-title">🤖 AI分析結果</div>
+                        <div className="estimation-name">{mealEstimation.name}</div>
+                        {mealEstimation.ingredients && (
+                          <div className="ai-ingredients">食材：{mealEstimation.ingredients}</div>
+                        )}
+                        <div className="pfc-row">
+                          <span>P（たんぱく質）：{mealEstimation.protein}g</span>
+                          <span>F（脂質）：{mealEstimation.fat}g</span>
+                          <span>C（炭水化物）：{mealEstimation.carbs}g</span>
+                        </div>
+                        <div className="ai-metrics-row">
+                          <div className="ai-metric">
+                            <span className="ai-metric-label">野菜量</span>
+                            <span className={`ai-veggie veggie-${mealEstimation.vegetableLevel ?? '普通'}`}>
+                              {mealEstimation.vegetableLevel ?? '－'}
+                            </span>
+                          </div>
+                          <div className="ai-metric">
+                            <span className="ai-metric-label">内臓脂肪リスク</span>
+                            <span className={`risk-badge risk-${mealEstimation.visceralFatRisk ?? '中'}`}>
+                              {mealEstimation.visceralFatRisk ?? '－'}
+                            </span>
+                          </div>
+                        </div>
+                        {mealEstimation.advice && mealEstimation.advice.length > 0 && (
+                          <div className="ai-advice-box">
+                            <div className="ai-advice-title">改善提案</div>
+                            <ul className="ai-advice-list">
+                              {mealEstimation.advice.map((a, i) => <li key={i}>{a}</li>)}
+                            </ul>
+                          </div>
+                        )}
+                        {mealEstimation.note && (
+                          <div className="estimation-note">💡 {mealEstimation.note}</div>
+                        )}
+                        <div className="estimation-warning">
+                          ※ AIによる推定です。実際のカロリー・栄養成分とは異なる場合があります。
+                        </div>
+                      </div>
+                    )}
+
+                    <label className="field" style={{ marginTop: 12 }}>
+                      <span>カロリー (kcal)</span>
+                      <input type="number" inputMode="numeric" value={mealManualCal}
+                        onChange={e => setMealManualCal(e.target.value)}
+                        placeholder={mealEstimation ? 'AI推定値を修正できます' : '手動で入力'} />
+                    </label>
 
                     <label className="field" style={{ marginTop: 12 }}>
                       <span>メモ</span>

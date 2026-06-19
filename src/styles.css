@@ -685,6 +685,150 @@ textarea { min-height: 80px; resize: vertical }
 .estimation-note { font-size: 0.82rem; color: #4a6040; line-height: 1.65; margin-bottom: 10px }
 .estimation-warning { font-size: 0.73rem; color: #8a7a5a; border-top: 1px solid #dde8d4; padding-top: 8px; line-height: 1.55 }
 
+/* ─── AI分析ボタン ─── */
+@keyframes spin { to { transform: rotate(360deg) } }
+
+.ai-analyze-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #4285f4, #34a853);
+  color: #fff;
+  font-size: 0.95rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(66,133,244,0.30);
+  transition: opacity 0.15s;
+}
+.ai-analyze-btn:disabled { opacity: 0.7; cursor: not-allowed }
+.ai-analyze-btn:not(:disabled):active { opacity: 0.85 }
+
+.ai-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid rgba(255,255,255,0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+.ai-reanalyze-btn {
+  width: 100%;
+  padding: 10px;
+  border: 1.5px solid #b0c8f4;
+  border-radius: 12px;
+  background: #f0f6ff;
+  color: #2a5fc8;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ai-reanalyze-btn:active { background: #ddeaff }
+
+.ai-error-box {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: #fff3f3;
+  border: 1px solid #f4c0c0;
+  border-radius: 10px;
+  color: #b03030;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+/* ─── AI分析結果カード ─── */
+.ai-result-card {
+  border-color: #b0c8f4;
+  background: linear-gradient(135deg, #f8fbff, #f0f6ff);
+}
+
+.ai-ingredients {
+  font-size: 0.78rem;
+  color: #5a6e8a;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.ai-metrics-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.ai-metric {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ai-metric-label {
+  font-size: 0.75rem;
+  color: #6a7a8a;
+  font-weight: 600;
+}
+
+/* 野菜量バッジ */
+.ai-veggie {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.veggie-十分 { background: #e2f5d4; color: #2a6010 }
+.veggie-普通 { background: #fff3cd; color: #7a5a04 }
+.veggie-不足 { background: #fde8e8; color: #b03030 }
+
+/* 内臓脂肪リスクバッジ */
+.risk-badge {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.risk-低 { background: #e2f5d4; color: #2a6010 }
+.risk-中 { background: #fff3cd; color: #7a5a04 }
+.risk-高 { background: #fde8e8; color: #b03030 }
+
+.ai-advice-box {
+  background: #f4f8ff;
+  border: 1px solid #ccddf4;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+
+.ai-advice-title {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #2a5fc8;
+  margin-bottom: 6px;
+}
+
+.ai-advice-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ai-advice-list li {
+  font-size: 0.82rem;
+  color: #2e3d5a;
+  line-height: 1.65;
+  margin-bottom: 2px;
+}
+
 /* ─── 記録完了アニメーション ─── */
 .meal-success {
   position: fixed;
