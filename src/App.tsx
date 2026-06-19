@@ -162,52 +162,125 @@ function compressImage(dataUrl: string, maxWidth = 800, quality = 0.72): Promise
   });
 }
 
+class GeminiApiError extends Error {
+  status: number;
+  statusText: string;
+  body: string;
+  constructor(status: number, statusText: string, body: string) {
+    super(`HTTP_${status}`);
+    this.status = status;
+    this.statusText = statusText;
+    this.body = body;
+  }
+}
+
 async function analyzeWithGemini(base64Image: string): Promise<MealEstimation> {
+  // ── Step 1: APIキー確認 ──────────────────────────────────
   const apiKey = (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) ?? '';
-  if (!apiKey) throw new Error('NO_KEY');
+  if (!apiKey) {
+    console.error('[Gemini] ❌ APIキー未設定 (VITE_GEMINI_API_KEY)');
+    throw new Error('NO_KEY');
+  }
+  console.log('[Gemini] ✅ APIキー取得OK:', apiKey.slice(0, 8) + '...');
 
+  // ── Step 2: base64 データ URL ヘッダ除去 ────────────────
   const base64Data = base64Image.replace(/^data:image\/[^;]+;base64,/, '');
+  const sizeKB = Math.round(base64Data.length * 0.75 / 1024);
+  console.log('[Gemini] 📷 画像サイズ:', sizeKB, 'KB (base64 chars:', base64Data.length, ')');
 
-  const prompt = `この食事写真を詳しく分析してください。内臓脂肪ダイエットの観点から以下のJSON形式のみで返してください。それ以外のテキストは一切含めないでください。
-{
-  "dishName": "料理名（日本語）",
-  "ingredients": "主な食材（日本語、カンマ区切り）",
-  "calories": 推定カロリー（整数、kcal）,
-  "protein": タンパク質（整数、g）,
-  "fat": 脂質（整数、g）,
-  "carbs": 炭水化物（整数、g）,
-  "vegetableLevel": "十分" または "普通" または "不足",
-  "visceralFatRisk": "低" または "中" または "高",
-  "advice": ["改善提案1", "改善提案2", "改善提案3"],
-  "note": "内臓脂肪ダイエット観点の一言アドバイス（50文字以内）"
-}`;
+  const prompt =
+    'この食事写真を詳しく分析してください。内臓脂肪ダイエットの観点から以下のJSON形式のみで返してください。' +
+    'コードブロックや余分なテキストは一切含めないでください。JSONオブジェクトだけを返してください。\n' +
+    '{\n' +
+    '  "dishName": "料理名（日本語）",\n' +
+    '  "ingredients": "主な食材（日本語、カンマ区切り）",\n' +
+    '  "calories": 推定カロリー整数,\n' +
+    '  "protein": タンパク質整数g,\n' +
+    '  "fat": 脂質整数g,\n' +
+    '  "carbs": 炭水化物整数g,\n' +
+    '  "vegetableLevel": "十分" または "普通" または "不足",\n' +
+    '  "visceralFatRisk": "低" または "中" または "高",\n' +
+    '  "advice": ["改善提案1", "改善提案2", "改善提案3"],\n' +
+    '  "note": "内臓脂肪ダイエット観点の一言アドバイス（50文字以内）"\n' +
+    '}';
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
-    {
+  const requestBody = {
+    contents: [{ parts: [
+      { inline_data: { mime_type: 'image/jpeg', data: base64Data } },
+      { text: prompt },
+    ]}],
+    generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
+  };
+
+  console.log('[Gemini] 🚀 送信開始 model: gemini-1.5-flash');
+  console.log('[Gemini] リクエスト構造:', JSON.stringify({
+    model: 'gemini-1.5-flash',
+    parts: ['[image/jpeg base64 ' + sizeKB + 'KB]', '(prompt text)'],
+    generationConfig: requestBody.generationConfig,
+  }));
+
+  // ── Step 3: API呼び出し ──────────────────────────────────
+  const MODEL = 'gemini-1.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { inline_data: { mime_type: 'image/jpeg', data: base64Data } },
-          { text: prompt },
-        ]}],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 1024 },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    if (res.status === 429 || res.status === 503) throw new Error('RATE_LIMIT');
-    throw new Error('API_ERROR');
+      body: JSON.stringify(requestBody),
+    });
+  } catch (networkErr) {
+    console.error('[Gemini] ❌ ネットワークエラー:', networkErr);
+    throw new Error('NETWORK_ERROR');
   }
 
-  const json = await res.json();
-  const text: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('PARSE_ERROR');
+  // ── Step 4: レスポンス取得 ──────────────────────────────
+  const rawBody = await res.text();
+  console.log('[Gemini] 📥 レスポンス受信:', res.status, res.statusText);
+  console.log('[Gemini] レスポンス全文:', rawBody);
 
-  const parsed = JSON.parse(match[0]);
+  if (!res.ok) {
+    console.error('[Gemini] ❌ HTTPエラー:', res.status, res.statusText);
+    console.error('[Gemini] エラーボディ:', rawBody);
+    throw new GeminiApiError(res.status, res.statusText, rawBody);
+  }
+
+  // ── Step 5: JSON パース ──────────────────────────────────
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(rawBody) as Record<string, unknown>;
+  } catch {
+    console.error('[Gemini] ❌ レスポンスのJSONパース失敗:', rawBody);
+    throw new Error('PARSE_RESPONSE_ERROR');
+  }
+
+  const candidates = json.candidates as Array<Record<string, unknown>> | undefined;
+  const firstCandidate = candidates?.[0] ?? {};
+  const content = (firstCandidate as Record<string, unknown>).content as Record<string, unknown> | undefined;
+  const parts = (content?.parts ?? []) as Array<Record<string, unknown>>;
+  const text: string = (parts[0]?.text as string | undefined) ?? '';
+
+  console.log('[Gemini] 📝 AIテキスト抽出:', text.slice(0, 300));
+
+  // ── Step 6: AIテキストからJSONを抽出 ────────────────────
+  const cleaned = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (!match) {
+    console.error('[Gemini] ❌ JSONブロックが見つかりません。AIテキスト:', text);
+    throw new Error('PARSE_JSON_NOT_FOUND');
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(match[0]) as Record<string, unknown>;
+  } catch (e) {
+    console.error('[Gemini] ❌ AIテキストのJSONパース失敗:', match[0], e);
+    throw new Error('PARSE_JSON_INVALID');
+  }
+
+  console.log('[Gemini] ✅ パース成功:', parsed);
+
   return {
     name: String(parsed.dishName ?? '不明な料理'),
     ingredients: parsed.ingredients ? String(parsed.ingredients) : undefined,
@@ -215,11 +288,11 @@ async function analyzeWithGemini(base64Image: string): Promise<MealEstimation> {
     protein: Number(parsed.protein) || 0,
     fat: Number(parsed.fat) || 0,
     carbs: Number(parsed.carbs) || 0,
-    vegetableLevel: (['十分', '普通', '不足'] as VegetableLevel[]).includes(parsed.vegetableLevel)
+    vegetableLevel: (['十分', '普通', '不足'] satisfies VegetableLevel[]).includes(parsed.vegetableLevel as VegetableLevel)
       ? parsed.vegetableLevel as VegetableLevel : undefined,
-    visceralFatRisk: (['低', '中', '高'] as VisceralFatRisk[]).includes(parsed.visceralFatRisk)
+    visceralFatRisk: (['低', '中', '高'] satisfies VisceralFatRisk[]).includes(parsed.visceralFatRisk as VisceralFatRisk)
       ? parsed.visceralFatRisk as VisceralFatRisk : undefined,
-    advice: Array.isArray(parsed.advice) ? parsed.advice.map(String) : [],
+    advice: Array.isArray(parsed.advice) ? (parsed.advice as unknown[]).map(String) : [],
     note: String(parsed.note ?? ''),
     aiAnalyzed: true,
   };
@@ -465,19 +538,57 @@ function App() {
     if (!mealPhoto || isAnalyzing) return;
     setIsAnalyzing(true);
     setAiError(null);
+    console.log('[AI分析] ── ボタン押下 ──────────────────');
     try {
       const result = await analyzeWithGemini(mealPhoto);
+      console.log('[AI分析] ✅ 完了:', result);
       setMealEstimation(result);
       setMealManualCal(String(result.calories));
       setHasAnalyzed(true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'API_ERROR';
-      if (msg === 'RATE_LIMIT') {
-        setAiError('AI分析上限に達しました。しばらく待ってから再試行してください。');
-      } else if (msg === 'NO_KEY') {
-        setAiError('APIキーが設定されていません（VITE_GEMINI_API_KEY）。');
+      console.error('[AI分析] ❌ キャッチしたエラー:', err);
+
+      if (err instanceof GeminiApiError) {
+        // HTTPステータス別に詳細表示
+        const { status, statusText, body } = err;
+        let bodySnippet = '';
+        try {
+          const parsed = JSON.parse(body) as Record<string, unknown>;
+          const errObj = (parsed.error ?? parsed) as Record<string, unknown>;
+          bodySnippet = String(errObj.message ?? body).slice(0, 120);
+        } catch {
+          bodySnippet = body.slice(0, 120);
+        }
+        if (status === 400) {
+          setAiError(`Gemini API 400 Bad Request\n${bodySnippet}`);
+        } else if (status === 403) {
+          setAiError(`Gemini API 403 Forbidden — APIキーが無効か権限なし\n${bodySnippet}`);
+        } else if (status === 404) {
+          setAiError(`Gemini API 404 Not Found — モデル名かURLが違う\n${bodySnippet}`);
+        } else if (status === 429) {
+          setAiError(`Gemini API 429 Rate Limit — 使用上限に達しました\n${bodySnippet}`);
+        } else if (status >= 500) {
+          setAiError(`Gemini API ${status} ${statusText} — サーバーエラー\n${bodySnippet}`);
+        } else {
+          setAiError(`Gemini API ${status} ${statusText}\n${bodySnippet}`);
+        }
+      } else if (err instanceof Error) {
+        const msg = err.message;
+        if (msg === 'NO_KEY') {
+          setAiError('APIキー未設定 (VITE_GEMINI_API_KEY)\nVercelの環境変数を確認してください');
+        } else if (msg === 'NETWORK_ERROR') {
+          setAiError('ネットワークエラー — インターネット接続を確認してください');
+        } else if (msg === 'PARSE_RESPONSE_ERROR') {
+          setAiError('APIレスポンスのJSONパース失敗 — console.logを確認');
+        } else if (msg === 'PARSE_JSON_NOT_FOUND') {
+          setAiError('AIの返答にJSONが含まれていませんでした — console.logを確認');
+        } else if (msg === 'PARSE_JSON_INVALID') {
+          setAiError('AIの返答JSONが不正でした — console.logを確認');
+        } else {
+          setAiError(`AI分析エラー: ${msg}`);
+        }
       } else {
-        setAiError('AI分析に失敗しました。写真の保存は続行できます。');
+        setAiError('不明なエラーが発生しました');
       }
     } finally {
       setIsAnalyzing(false);
@@ -966,7 +1077,16 @@ function App() {
 
                     {/* エラー表示 */}
                     {aiError && (
-                      <div className="ai-error-box">{aiError}</div>
+                      <div className="ai-error-box">
+                        {aiError?.split('\n').map((line, i) => (
+                          <div key={i} style={i === 0 ? { fontWeight: 700 } : { fontSize: '0.75rem', marginTop: 3, opacity: 0.85 }}>
+                            {line}
+                          </div>
+                        ))}
+                        <div style={{ fontSize: '0.72rem', marginTop: 6, opacity: 0.7 }}>
+                          ※ ブラウザのDevTools Console (F12) に詳細ログがあります
+                        </div>
+                      </div>
                     )}
 
                     {/* AI分析結果 */}

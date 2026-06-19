@@ -883,13 +883,14 @@ textarea { min-height: 80px; resize: vertical }
 
 .ai-error-box {
   margin-top: 10px;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: #fff3f3;
-  border: 1px solid #f4c0c0;
+  border: 1.5px solid #f4c0c0;
   border-radius: 10px;
   color: #b03030;
   font-size: 0.82rem;
-  line-height: 1.55;
+  line-height: 1.6;
+  word-break: break-all;
 }
 
 /* ─── AI分析結果カード ─── */
