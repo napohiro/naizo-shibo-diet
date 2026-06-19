@@ -410,6 +410,7 @@ function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [isRateLimited, setIsRateLimited] = useState(false);
   const [editingMealId, setEditingMealId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<MealEditDraft | null>(null);
   const [expandedHomeMealType, setExpandedHomeMealType] = useState<MealType | null>(null);
@@ -475,6 +476,7 @@ function App() {
       setMealManualCal('');
       setHasAnalyzed(false);
       setAiError(null);
+      setIsRateLimited(false);
     };
     reader.readAsDataURL(file);
   };
@@ -566,7 +568,8 @@ function App() {
         } else if (status === 404) {
           setAiError(`Gemini API 404 Not Found — モデル名かURLが違う\n${bodySnippet}`);
         } else if (status === 429) {
-          setAiError(`Gemini API 429 Rate Limit — 使用上限に達しました\n${bodySnippet}`);
+          setIsRateLimited(true);
+          setAiError(null);
         } else if (status >= 500) {
           setAiError(`Gemini API ${status} ${statusText} — サーバーエラー\n${bodySnippet}`);
         } else {
@@ -603,6 +606,7 @@ function App() {
     setMealMemo('');
     setHasAnalyzed(false);
     setAiError(null);
+    setIsRateLimited(false);
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
@@ -634,6 +638,7 @@ function App() {
     setMealMemo('');
     setHasAnalyzed(false);
     setAiError(null);
+    setIsRateLimited(false);
     showToast('記録しました');
   };
 
@@ -645,6 +650,7 @@ function App() {
     setMealMemo('');
     setHasAnalyzed(false);
     setAiError(null);
+    setIsRateLimited(false);
   };
 
   const addKnowledge = () => {
@@ -1049,8 +1055,8 @@ function App() {
                       </div>
                     )}
 
-                    {/* AI分析ボタン */}
-                    {mealPhoto && (
+                    {/* AI分析ボタン / 上限表示 */}
+                    {mealPhoto && !isRateLimited && (
                       <div style={{ marginTop: 12 }}>
                         {!hasAnalyzed ? (
                           <button
@@ -1075,10 +1081,28 @@ function App() {
                       </div>
                     )}
 
-                    {/* エラー表示 */}
-                    {aiError && (
+                    {/* 429 上限メッセージ（ユーザー向け） */}
+                    {isRateLimited && (
+                      <div className="ai-ratelimit-box">
+                        <div className="ai-ratelimit-icon">⏳</div>
+                        <div className="ai-ratelimit-title">今日はAI分析の無料利用上限に達しました</div>
+                        <div className="ai-ratelimit-body">
+                          写真の保存と手動入力はできます。<br />
+                          時間を置くか、明日またAI分析を試してください。
+                        </div>
+                        <button
+                          className="ai-retry-later-btn"
+                          onClick={() => { setIsRateLimited(false); setHasAnalyzed(false); }}
+                        >
+                          🔄 あとで再分析
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 429以外のエラー（詳細表示） */}
+                    {aiError && !isRateLimited && (
                       <div className="ai-error-box">
-                        {aiError?.split('\n').map((line, i) => (
+                        {aiError.split('\n').map((line, i) => (
                           <div key={i} style={i === 0 ? { fontWeight: 700 } : { fontSize: '0.75rem', marginTop: 3, opacity: 0.85 }}>
                             {line}
                           </div>
@@ -1133,11 +1157,13 @@ function App() {
                       </div>
                     )}
 
-                    <label className="field" style={{ marginTop: 12 }}>
-                      <span>カロリー (kcal)</span>
+                    {/* カロリー入力（上限時は目立たせる） */}
+                    <label className={`field ${isRateLimited ? 'field-highlighted' : ''}`} style={{ marginTop: 12 }}>
+                      <span>{isRateLimited ? 'カロリーを手動で入力してください (kcal)' : 'カロリー (kcal)'}</span>
                       <input type="number" inputMode="numeric" value={mealManualCal}
                         onChange={e => setMealManualCal(e.target.value)}
-                        placeholder={mealEstimation ? 'AI推定値を修正できます' : '手動で入力'} />
+                        placeholder={isRateLimited ? '例: 650' : mealEstimation ? 'AI推定値を修正できます' : '手動で入力'}
+                        className={isRateLimited ? 'input-highlighted' : ''} />
                     </label>
 
                     <label className="field" style={{ marginTop: 12 }}>

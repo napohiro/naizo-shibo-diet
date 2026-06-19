@@ -893,6 +893,66 @@ textarea { min-height: 80px; resize: vertical }
   word-break: break-all;
 }
 
+/* ─── 429 上限メッセージ ─── */
+.ai-ratelimit-box {
+  margin-top: 12px;
+  padding: 16px 14px 14px;
+  background: linear-gradient(135deg, #fffbf0, #fff8e0);
+  border: 1.5px solid #f0d080;
+  border-radius: 14px;
+  text-align: center;
+}
+
+.ai-ratelimit-icon {
+  font-size: 2rem;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.ai-ratelimit-title {
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: #7a5800;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.ai-ratelimit-body {
+  font-size: 0.8rem;
+  color: #7a6030;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+
+.ai-retry-later-btn {
+  display: inline-block;
+  padding: 9px 20px;
+  border-radius: 10px;
+  border: 1.5px solid #d4a820;
+  background: #fff8e0;
+  color: #7a5800;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.ai-retry-later-btn:active { background: #fcedb0 }
+
+/* ─── 強調カロリー入力（上限時） ─── */
+.field-highlighted > span {
+  color: #3a6028 !important;
+  font-weight: 700 !important;
+  font-size: 0.88rem !important;
+}
+
+.input-highlighted {
+  border: 2px solid #5aad3e !important;
+  background: #f4fbef !important;
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+  color: #1e3020 !important;
+}
+
 /* ─── AI分析結果カード ─── */
 .ai-result-card {
   border-color: #b0c8f4;
