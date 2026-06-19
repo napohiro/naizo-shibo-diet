@@ -102,8 +102,30 @@ function getStorage<T>(key: string, fallback: T): T {
   }
 }
 
-function setStorage<T>(key: string, value: T) {
-  localStorage.setItem(key, JSON.stringify(value));
+function setStorage<T>(key: string, value: T): boolean {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function compressImage(dataUrl: string, maxWidth = 800, quality = 0.72): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.width);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.width * scale);
+      canvas.height = Math.round(img.height * scale);
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
 }
 
 function calorieBadge(cal: number): { label: string; cls: string } {
@@ -270,13 +292,18 @@ function App() {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setMealPhoto(reader.result as string);
+    reader.onload = async () => {
+      const compressed = await compressImage(reader.result as string);
+      setMealPhoto(compressed);
       const est = MOCK_ESTIMATIONS[Math.floor(Math.random() * MOCK_ESTIMATIONS.length)];
       setMealEstimation(est);
       setMealManualCal(String(est.calories));
     };
     reader.readAsDataURL(file);
+  };
+
+  const updateMealCal = (id: string, value: string) => {
+    setMeals(prev => prev.map(m => m.id === id ? { ...m, manualCalories: value } : m));
   };
 
   const openMealForm = (type: MealType) => {
@@ -351,7 +378,7 @@ function App() {
         <div className="meal-success">
           <div className="meal-success-inner">
             <div className="meal-success-icon">✓</div>
-            <div className="meal-success-text">記録完了！</div>
+            <div className="meal-success-text">記録しました</div>
           </div>
         </div>
       )}
@@ -415,9 +442,17 @@ function App() {
                     const c = parseInt(m.manualCalories || String(m.estimatedCalories ?? '0'));
                     return s + (isNaN(c) ? 0 : c);
                   }, 0);
+                  const photos = ms.filter(m => m.photo).map(m => m.photo!);
                   return (
                     <div key={type} className="home-meal-row">
                       <span className="meal-type-badge">{type}</span>
+                      {photos.length > 0 && (
+                        <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                          {photos.slice(0, 2).map((src, i) => (
+                            <img key={i} src={src} alt="食事" style={{ width: 36, height: 36, objectFit: 'cover', borderRadius: 6 }} />
+                          ))}
+                        </div>
+                      )}
                       <span className="home-meal-name">{ms.map(m => m.estimatedName || 'メモあり').join('、')}</span>
                       <span className="cal-badge">{typeCal} kcal</span>
                     </div>
@@ -522,20 +557,36 @@ function App() {
                   const cal = parseInt(m.manualCalories || String(m.estimatedCalories ?? '0'));
                   const badge = !isNaN(cal) && cal > 0 ? calorieBadge(cal) : null;
                   return (
-                    <div key={m.id} className="meal-record-card">
-                      {m.photo && <img src={m.photo} alt="食事写真" className="meal-thumb" />}
-                      <div className="meal-record-body">
-                        {m.estimatedName && <div className="meal-record-name">{m.estimatedName}</div>}
-                        <div className="meal-record-cal-row">
-                          <span className="meal-record-cal">{!isNaN(cal) ? cal : '－'} kcal</span>
-                          {badge && <span className={`cal-eval-badge ${badge.cls}`}>{badge.label}</span>}
+                    <div key={m.id} className="meal-record-card" style={{ flexDirection: 'column', gap: 8 }}>
+                      <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                        {m.photo && <img src={m.photo} alt="食事写真" className="meal-thumb" />}
+                        <div className="meal-record-body">
+                          <div style={{ marginBottom: 5 }}>
+                            <span className="meal-type-badge">{m.type === '朝' ? '朝食' : m.type === '昼' ? '昼食' : m.type === '夜' ? '夕食' : '間食'}</span>
+                          </div>
+                          {m.estimatedName && <div className="meal-record-name">{m.estimatedName}</div>}
+                          <div className="meal-record-cal-row">
+                            <span className="meal-record-cal">{!isNaN(cal) ? cal : '－'} kcal</span>
+                            {badge && <span className={`cal-eval-badge ${badge.cls}`}>{badge.label}</span>}
+                          </div>
+                          {m.protein != null && (
+                            <div className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</div>
+                          )}
+                          {m.memo && <div className="meal-record-memo">{m.memo}</div>}
                         </div>
-                        {m.protein != null && (
-                          <div className="pfc-text">P:{m.protein}g F:{m.fat}g C:{m.carbs}g</div>
-                        )}
-                        {m.memo && <div className="meal-record-memo">{m.memo}</div>}
+                        <button className="delete-btn" onClick={() => setMeals(prev => prev.filter(x => x.id !== m.id))}>✕</button>
                       </div>
-                      <button className="delete-btn" onClick={() => setMeals(prev => prev.filter(x => x.id !== m.id))}>✕</button>
+                      <label className="field" style={{ marginTop: 2 }}>
+                        <span style={{ fontSize: '0.75rem' }}>カロリー修正 (kcal)</span>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          value={m.manualCalories}
+                          onChange={e => updateMealCal(m.id, e.target.value)}
+                          placeholder="カロリーを修正"
+                          style={{ padding: '5px 10px', fontSize: '0.85rem' }}
+                        />
+                      </label>
                     </div>
                   );
                 })}
